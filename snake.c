@@ -2,162 +2,139 @@
 #include <stdlib.h>
 #include <time.h>
 
+#define SCREEN_WIDTH 800
+#define SCREEN_HEIGHT 600
 #define CELL_SIZE 20
-#define GRID_WIDTH 40
-#define GRID_HEIGHT 30
-#define SCREEN_WIDTH (CELL_SIZE * GRID_WIDTH)
-#define SCREEN_HEIGHT (CELL_SIZE * GRID_HEIGHT)
+#define MAX_SNAKE_LENGTH 100
 
 typedef struct {
     int x;
     int y;
-} Vector2i;
+} Vector2Int;
 
-int main(void) {
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Snake Game - Raylib");
-    InitAudioDevice();
+typedef enum { MENU, GAME, PAUSE } GameState;
 
-    // Charger musique (ajoute un fichier "background.mp3" dans le même dossier)
-    Music music = LoadMusicStream("background.mp3");
-    PlayMusicStream(music);
+typedef enum { SHAPE_CIRCLE, SHAPE_TRIANGLE, SHAPE_SQUARE } FoodShape;
 
+typedef struct {
+    Vector2Int position;
+    FoodShape shape;
+} Food;
+
+void DrawFood(Food food);
+
+int main() {
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Snake Game");
     SetTargetFPS(10);
+    InitAudioDevice();
     srand(time(NULL));
 
-    // Initialisation du serpent
-    Vector2i snake[GRID_WIDTH * GRID_HEIGHT] = {0};
-    int snakeLength = 1;
-    snake[0].x = GRID_WIDTH / 2;
-    snake[0].y = GRID_HEIGHT / 2;
+    GameState state = MENU;
+    int menuOption = 0;
+    int maxMenuOptions = 3;
+    float volume = 1.0f;
 
-    Vector2i fruit;
-    fruit.x = rand() % GRID_WIDTH;
-    fruit.y = rand() % GRID_HEIGHT;
-
-    int dirX = 0;
-    int dirY = 0;
-
-    int gameOver = 0;
+    Vector2Int direction = {1, 0};
+    Vector2Int snake[MAX_SNAKE_LENGTH];
+    int snakeLength = 3;
+    for (int i = 0; i < snakeLength; i++) {
+        snake[i].x = 10 - i;
+        snake[i].y = 10;
+    }
+    Food fruit = {
+        .position = {rand() % (SCREEN_WIDTH / CELL_SIZE), rand() % (SCREEN_HEIGHT / CELL_SIZE)},
+        .shape = rand() % 3
+    };
     int score = 0;
-    bool paused = false;
-
+    bool pause = false;
+    bool isMultiplayer = false;
     while (!WindowShouldClose()) {
-        UpdateMusicStream(music);
-
-        // Gestion pause avec P
-        if (IsKeyPressed(KEY_P)) paused = !paused;
-        if (paused) {
-            // Pause musique si jeu en pause
-            PauseMusicStream(music);
-        } else {
-            ResumeMusicStream(music);
-        }
-
-        if (!paused && !gameOver) {
-            // Gestion des entrées
-            if (IsKeyPressed(KEY_UP) && dirY != 1) {
-                dirX = 0; dirY = -1;
+        if (state == MENU) {
+            if (IsKeyPressed(KEY_DOWN)) menuOption = (menuOption + 1) % maxMenuOptions;
+            if (IsKeyPressed(KEY_UP)) menuOption = (menuOption - 1 + maxMenuOptions) % maxMenuOptions;
+            if (IsKeyPressed(KEY_ENTER)) {
+                if (menuOption == 0) state = GAME;
+                if (menuOption == 1) volume = (volume < 1.0f) ? volume + 0.1f : 0.0f;
+                if (menuOption == 2) isMultiplayer = !isMultiplayer;
             }
-            else if (IsKeyPressed(KEY_DOWN) && dirY != -1) {
-                dirX = 0; dirY = 1;
+        } else if (state == GAME) {
+            if (IsKeyPressed(KEY_V)) {
+                state = MENU;
+                continue;
             }
-            else if (IsKeyPressed(KEY_LEFT) && dirX != 1) {
-                dirX = -1; dirY = 0;
+            if (IsKeyPressed(KEY_F)) {
+                pause = !pause;
             }
-            else if (IsKeyPressed(KEY_RIGHT) && dirX != -1) {
-                dirX = 1; dirY = 0;
-            }
-
-            // Déplacer le serpent si direction non nulle
-            if (dirX != 0 || dirY != 0) {
-                // Déplacer le corps
-                for (int i = snakeLength - 1; i > 0; i--) {
+            if (!pause) {
+                if (IsKeyPressed(KEY_UP) && direction.y != 1) direction = (Vector2Int){0, -1};
+                else if (IsKeyPressed(KEY_DOWN) && direction.y != -1) direction = (Vector2Int){0, 1};
+                else if (IsKeyPressed(KEY_LEFT) && direction.x != 1) direction = (Vector2Int){-1, 0};
+                else if (IsKeyPressed(KEY_RIGHT) && direction.x != -1) direction = (Vector2Int){1, 0};
+                for (int i = snakeLength; i > 0; i--) {
                     snake[i] = snake[i - 1];
                 }
-                // Déplacer la tête
-                snake[0].x += dirX;
-                snake[0].y += dirY;
+                snake[0].x = (snake[0].x + direction.x + SCREEN_WIDTH / CELL_SIZE) % (SCREEN_WIDTH / CELL_SIZE);
+                snake[0].y = (snake[0].y + direction.y + SCREEN_HEIGHT / CELL_SIZE) % (SCREEN_HEIGHT / CELL_SIZE);
 
-                // Wrap-around : passage d’un côté à l’autre
-                if (snake[0].x < 0) snake[0].x = GRID_WIDTH - 1;
-                else if (snake[0].x >= GRID_WIDTH) snake[0].x = 0;
-                if (snake[0].y < 0) snake[0].y = GRID_HEIGHT - 1;
-                else if (snake[0].y >= GRID_HEIGHT) snake[0].y = 0;
-
-                // Collision corps
                 for (int i = 1; i < snakeLength; i++) {
                     if (snake[0].x == snake[i].x && snake[0].y == snake[i].y) {
-                        gameOver = 1;
+                        state = MENU;
                     }
                 }
-
-                // Manger fruit
-                if (snake[0].x == fruit.x && snake[0].y == fruit.y) {
-                    score++;
+                if (snake[0].x == fruit.position.x && snake[0].y == fruit.position.y) {
                     snakeLength++;
-                    // Générer nouveau fruit
-                    do {
-                        fruit.x = rand() % GRID_WIDTH;
-                        fruit.y = rand() % GRID_HEIGHT;
-                        // Vérifier que fruit n'apparaisse pas sur le serpent
-                        bool onSnake = false;
-                        for (int i = 0; i < snakeLength; i++) {
-                            if (fruit.x == snake[i].x && fruit.y == snake[i].y) {
-                                onSnake = true;
-                                break;
-                            }
-                        }
-                        if (!onSnake) break;
-                    } while (1);
+                    score += 10;
+                    fruit.position.x = rand() % (SCREEN_WIDTH / CELL_SIZE);
+                    fruit.position.y = rand() % (SCREEN_HEIGHT / CELL_SIZE);
+                    fruit.shape = rand() % 3;
                 }
             }
         }
-
-        // Dessin
         BeginDrawing();
+        ClearBackground((Color){20, 40, 80, 255});  // Bleu foncé
 
-        // Fond bleu ciel #87CEEB (RGB 135,206,235)
-        ClearBackground((Color){135, 206, 235, 255});
+        if (state == MENU) {
+            DrawText("SNAKE GAME", SCREEN_WIDTH / 2 - 150, 50, 40, RAYWHITE);
 
-        if (gameOver) {
-            DrawText("GAME OVER!", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 - 40, 40, RED);
-            DrawText(TextFormat("Score final: %d", score), SCREEN_WIDTH/2 - 80, SCREEN_HEIGHT/2 + 10, 30, WHITE);
-            DrawText("Appuyez sur R pour rejouer", SCREEN_WIDTH/2 - 110, SCREEN_HEIGHT/2 + 60, 20, WHITE);
+            const char* options[] = {"Start", TextFormat("Sound: %.0f%%", volume * 100), isMultiplayer ? "Multiplayer: ON" : "Multiplayer: OFF"};
 
-            if (IsKeyPressed(KEY_R)) {
-                // Reset jeu
-                snakeLength = 1;
-                snake[0].x = GRID_WIDTH / 2;
-                snake[0].y = GRID_HEIGHT / 2;
-                dirX = 0;
-                dirY = 0;
-                score = 0;
-                gameOver = 0;
-                fruit.x = rand() % GRID_WIDTH;
-                fruit.y = rand() % GRID_HEIGHT;
+            for (int i = 0; i < maxMenuOptions; i++) {
+                Color color = (i == menuOption) ? YELLOW : WHITE;
+                DrawText(options[i], SCREEN_WIDTH / 2 - 100, 150 + i * 50, 30, color);
             }
-        } else {
-            // Dessiner serpent
+            DrawText("Use arrows + ENTER to select. Press ESC to quit.", 100, SCREEN_HEIGHT - 40, 20, GRAY);
+        } else if (state == GAME) {
             for (int i = 0; i < snakeLength; i++) {
-                DrawRectangle(snake[i].x * CELL_SIZE, snake[i].y * CELL_SIZE, CELL_SIZE, CELL_SIZE, GREEN);
+                DrawRectangle(snake[i].x * CELL_SIZE, snake[i].y * CELL_SIZE, CELL_SIZE, CELL_SIZE, DARKGREEN);
             }
-
-            // Dessiner fruit
-            DrawRectangle(fruit.x * CELL_SIZE, fruit.y * CELL_SIZE, CELL_SIZE, CELL_SIZE, RED);
-
-            // Afficher score et pause
+            DrawFood(fruit);
             DrawText(TextFormat("Score: %d", score), 10, 10, 20, WHITE);
-            if (paused) {
-                DrawText("PAUSE (P pour reprendre)", SCREEN_WIDTH/2 - 120, SCREEN_HEIGHT/2, 30, DARKGRAY);
-            }
+            if (pause) DrawText("PAUSED (Press F to resume)", SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT / 2, 20, ORANGE);
         }
-
         EndDrawing();
     }
-
-    UnloadMusicStream(music);
-    CloseAudioDevice();
     CloseWindow();
-
     return 0;
+}
+void DrawFood(Food food) {
+    int px = food.position.x * CELL_SIZE + CELL_SIZE / 2;
+    int py = food.position.y * CELL_SIZE + CELL_SIZE / 2;
+    int size = CELL_SIZE / 2;
+
+    switch (food.shape) {
+        case SHAPE_CIRCLE:
+            DrawCircle(px, py, size, BLACK);
+            break;
+        case SHAPE_TRIANGLE:
+            DrawTriangle(
+                (Vector2){px, py - size},
+                (Vector2){px - size, py + size},
+                (Vector2){px + size, py + size},
+                BLACK
+            );
+            break;
+        case SHAPE_SQUARE:
+            DrawRectangle(food.position.x * CELL_SIZE, food.position.y * CELL_SIZE, CELL_SIZE, CELL_SIZE, BLACK);
+            break;
+    }
 }
